@@ -7,7 +7,7 @@ import {
   Alert,
   SafeAreaView,
 } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { Camera, X } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -16,20 +16,11 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export default function ScannerScreen() {
   const { user } = useAuth();
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
 
-  useEffect(() => {
-    const getBarCodeScannerPermissions = async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    };
-
-    getBarCodeScannerPermissions();
-  }, []);
-
-  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = async ({ type, data }: any) => {
     setScanned(true);
     setCameraActive(false);
 
@@ -101,7 +92,7 @@ export default function ScannerScreen() {
     setScanned(false);
   };
 
-  if (hasPermission === null) {
+  if (!permission) {
     return (
       <View style={styles.container}>
         <Text style={styles.message}>Solicitando permiso para usar la cámara...</Text>
@@ -109,12 +100,13 @@ export default function ScannerScreen() {
     );
   }
 
-  if (hasPermission === false) {
+  if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <Text style={styles.message}>
-          No hay acceso a la cámara. Ve a configuraciones para habilitarla.
-        </Text>
+        <Text style={styles.message}>Necesitamos permiso para usar la cámara</Text>
+        <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
+          <Text style={styles.permissionButtonText}>Conceder permiso</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -130,9 +122,12 @@ export default function ScannerScreen() {
 
       {cameraActive ? (
         <View style={styles.cameraContainer}>
-          <BarCodeScanner
-            onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+          <CameraView
             style={styles.camera}
+            onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+            barcodeScannerSettings={{
+              barcodeTypes: ['qr', 'pdf417', 'ean13', 'ean8', 'code128', 'code39'],
+            }}
           />
           
           <View style={styles.overlay}>
@@ -286,6 +281,19 @@ const styles = StyleSheet.create({
     color: Colors.text,
     textAlign: 'center',
     margin: 20,
+  },
+  permissionButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 20,
+    alignSelf: 'center',
+  },
+  permissionButtonText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '600',
   },
   tips: {
     backgroundColor: Colors.white,
