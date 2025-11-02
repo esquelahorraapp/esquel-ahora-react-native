@@ -1,0 +1,308 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  SafeAreaView,
+} from 'react-native';
+import { BarCodeScanner } from 'expo-barcode-scanner';
+import { Camera, X } from 'lucide-react-native';
+import { Colors } from '@/constants/Colors';
+import { supabase } from '@/lib/supabase';
+import { router } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
+
+export default function ScannerScreen() {
+  const { user } = useAuth();
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [scanned, setScanned] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+
+  useEffect(() => {
+    const getBarCodeScannerPermissions = async () => {
+      const { status } = await BarCodeScanner.requestPermissionsAsync();
+      setHasPermission(status === 'granted');
+    };
+
+    getBarCodeScannerPermissions();
+  }, []);
+
+  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
+    setScanned(true);
+    setCameraActive(false);
+
+    try {
+      // Check if product exists
+      const { data: existingProduct, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('codigo_barras', data)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+
+      if (existingProduct) {
+        // Product exists, navigate to product detail
+        Alert.alert(
+          'Producto encontrado',
+          `${existingProduct.nombre} - ${existingProduct.marca}`,
+          [
+            {
+              text: 'Ver producto',
+              onPress: () => router.push(`/product/${existingProduct.id}`),
+            },
+            {
+              text: 'Escanear otro',
+              onPress: () => {
+                setScanned(false);
+                setCameraActive(true);
+              },
+            },
+          ]
+        );
+      } else {
+        // Product doesn't exist, offer to create it
+        Alert.alert(
+          'Producto no encontrado',
+          'Este producto no está en nuestra base de datos. ¿Quieres agregarlo?',
+          [
+            {
+              text: 'Agregar producto',
+              onPress: () => router.push(`/add-product?barcode=${data}`),
+            },
+            {
+              text: 'Escanear otro',
+              onPress: () => {
+                setScanned(false);
+                setCameraActive(true);
+              },
+            },
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Error checking product:', error);
+      Alert.alert('Error', 'No se pudo procesar el código de barras');
+      setScanned(false);
+    }
+  };
+
+  const startScanning = () => {
+    setScanned(false);
+    setCameraActive(true);
+  };
+
+  const stopScanning = () => {
+    setCameraActive(false);
+    setScanned(false);
+  };
+
+  if (hasPermission === null) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.message}>Solicitando permiso para usar la cámara...</Text>
+      </View>
+    );
+  }
+
+  if (hasPermission === false) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.message}>
+          No hay acceso a la cámara. Ve a configuraciones para habilitarla.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Escanear Producto</Text>
+        <Text style={styles.subtitle}>
+          Apunta la cámara al código de barras del producto
+        </Text>
+      </View>
+
+      {cameraActive ? (
+        <View style={styles.cameraContainer}>
+          <BarCodeScanner
+            onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+            style={styles.camera}
+          />
+          
+          <View style={styles.overlay}>
+            <View style={styles.scanArea} />
+          </View>
+
+          <TouchableOpacity style={styles.closeButton} onPress={stopScanning}>
+            <X size={24} color={Colors.white} />
+          </TouchableOpacity>
+
+          <View style={styles.instructions}>
+            <Text style={styles.instructionsText}>
+              Coloca el código de barras dentro del marco
+            </Text>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.content}>
+          <View style={styles.scanPrompt}>
+            <Camera size={80} color={Colors.primary} />
+            <Text style={styles.promptTitle}>¡Listo para escanear!</Text>
+            <Text style={styles.promptText}>
+              Presiona el botón para activar la cámara y escanear códigos de barras
+            </Text>
+          </View>
+
+          <TouchableOpacity style={styles.scanButton} onPress={startScanning}>
+            <Text style={styles.scanButtonText}>Iniciar Escáner</Text>
+          </TouchableOpacity>
+
+          <View style={styles.tips}>
+            <Text style={styles.tipsTitle}>📋 Consejos</Text>
+            <Text style={styles.tip}>• Mantén el teléfono estable</Text>
+            <Text style={styles.tip}>• Asegúrate de tener buena iluminación</Text>
+            <Text style={styles.tip}>• Coloca el código de barras dentro del marco</Text>
+            <Text style={styles.tip}>• Si el producto no existe, podrás agregarlo</Text>
+          </View>
+        </View>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  header: {
+    backgroundColor: Colors.primary,
+    padding: 20,
+    paddingTop: 40,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: Colors.white,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: Colors.white,
+    opacity: 0.9,
+  },
+  content: {
+    flex: 1,
+    padding: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanPrompt: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  promptTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: Colors.text,
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  promptText: {
+    fontSize: 16,
+    color: Colors.placeholder,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  scanButton: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 40,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginBottom: 40,
+  },
+  scanButtonText: {
+    color: Colors.white,
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  cameraContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  camera: {
+    flex: 1,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanArea: {
+    width: 250,
+    height: 150,
+    borderWidth: 2,
+    borderColor: Colors.secondary,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 20,
+    padding: 10,
+  },
+  instructions: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+  },
+  instructionsText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '500',
+    textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  message: {
+    fontSize: 18,
+    color: Colors.text,
+    textAlign: 'center',
+    margin: 20,
+  },
+  tips: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 20,
+    width: '100%',
+  },
+  tipsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.text,
+    marginBottom: 12,
+  },
+  tip: {
+    fontSize: 14,
+    color: Colors.text,
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+});
