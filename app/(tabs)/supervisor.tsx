@@ -28,6 +28,7 @@ import { PendingPrice, Price, Product, Store, UserProfile } from '@/types/databa
 
 export default function SupervisorScreen() {
   const { profile } = useAuth();
+  const { loading: authLoading } = useAuth();
   const [pendingPrices, setPendingPrices] = useState<PendingPrice[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -181,6 +182,17 @@ export default function SupervisorScreen() {
       minute: '2-digit',
     });
   };
+
+  // If auth state still loading, show a loader so profile can be fetched
+  if (authLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Cargando...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (profile?.rol !== 'supervisor' && profile?.rol !== 'admin') {
     return (

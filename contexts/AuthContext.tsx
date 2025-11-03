@@ -36,6 +36,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log('onAuthStateChanged, user uid:', user?.uid);
       setUser(user);
       if (user) {
         await fetchUserProfile(user.uid);
@@ -48,7 +49,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return unsubscribe;
   }, []);
 
-  const fetchUserProfile = async (userId: string) => {
+  const fetchUserProfile = async (userId: string, retries = 3) => {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
       if (userDoc.exists()) {
@@ -58,8 +59,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           fecha_registro: data.fecha_registro?.toDate() || new Date(),
         } as UserProfile);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching profile:', error);
+
+      if (error?.code === 'permission-denied' || error?.message?.includes('Missing or insufficient permissions')) {
+        console.error('Firestore permission denied when fetching user profile. Revisa las reglas de seguridad en Firebase Console (Firestore) y que el usuario esté autenticado y tenga permisos para leer /users/' + userId);
+      }
+
+      // Consider a broader set of network-related error signals (Firestore or Auth network failures)
+      const message = String(error?.message || '').toLowerCase();
+      const code = String(error?.code || '').toLowerCase();
+      const isNetworkError = code.includes('network') || message.includes('network') || message.includes('offline') || code === 'unavailable';
+
+      // Retry on detected network errors
+      if (retries > 0 && isNetworkError) {
+        console.log(`Network error detected when fetching profile. Retrying... (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return fetchUserProfile(userId, retries - 1);
+      }
+
+      // If not retried or still failing, keep profile as null (offline) and allow app to operate in offline mode
+      if (!isNetworkError) {
+        // For non-network errors we may want to surface or log additional info; already logged above.
+      }
     }
   };
 

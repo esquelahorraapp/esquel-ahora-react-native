@@ -6,9 +6,9 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, TrendingDown } from 'lucide-react-native';
 import { 
   collection, 
@@ -115,6 +115,10 @@ export default function HomeScreen() {
       setFeaturedProducts(productsData);
     } catch (error) {
       console.error('Error fetching featured products:', error);
+      const err: any = error;
+      if (err?.code === 'permission-denied' || err?.message?.includes('Missing or insufficient permissions')) {
+        Alert.alert('Permisos', 'No tienes permiso para leer los datos destacados. Revisa las reglas de seguridad de Firestore en Firebase Console.');
+      }
     }
   };
 

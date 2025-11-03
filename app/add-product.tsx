@@ -37,6 +37,13 @@ export default function AddProductScreen() {
   ];
 
   const handleAddProduct = async () => {
+    if (!user) {
+      Alert.alert('Inicia sesión', 'Debes iniciar sesión para agregar productos', [
+        { text: 'Ir a login', onPress: () => router.push('/(auth)/login') },
+        { text: 'Cancelar', style: 'cancel' },
+      ]);
+      return;
+    }
     if (!nombre || !marca) {
       Alert.alert('Error', 'Por favor completa todos los campos requeridos');
       return;
@@ -90,7 +97,12 @@ export default function AddProductScreen() {
       }
     } catch (error) {
       console.error('Error adding product:', error);
-      Alert.alert('Error', 'No se pudo agregar el producto');
+      const err: any = error;
+      if (err?.code === 'permission-denied' || err?.message?.includes('Missing or insufficient permissions')) {
+        Alert.alert('Permisos', 'No tienes permisos para agregar productos. Revisa las reglas de Firestore o inicia sesión con una cuenta con permisos.');
+      } else {
+        Alert.alert('Error', 'No se pudo agregar el producto');
+      }
     } finally {
       setLoading(false);
     }

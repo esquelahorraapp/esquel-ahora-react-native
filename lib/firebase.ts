@@ -1,6 +1,9 @@
+import 'react-native-url-polyfill/auto';
+import { Platform } from 'react-native';
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeAuth, getReactNativePersistence, getAuth, browserLocalPersistence } from 'firebase/auth';
+import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+import { initializeFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -16,8 +19,26 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase services
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Use platform-specific persistence
+export const auth = Platform.OS === 'web' 
+  ? initializeAuth(app, {
+      persistence: browserLocalPersistence,
+    })
+  : initializeAuth(app, {
+      persistence: getReactNativePersistence(ReactNativeAsyncStorage),
+    });
+
+// On React Native / Expo the default WebChannel transport can fail.
+// Force long-polling and disable fetch streams to improve reliability.
+// Enable local cache for offline support
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+  useFetchStreams: false,
+  localCache: {
+    kind: 'persistent',
+  },
+});
+
 export const storage = getStorage(app);
 
 export default app;

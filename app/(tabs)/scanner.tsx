@@ -65,10 +65,13 @@ export default function ScannerScreen() {
           'Producto no encontrado',
           'Este producto no está en nuestra base de datos. ¿Quieres agregarlo?',
           [
-            {
-              text: 'Agregar producto',
-              onPress: () => router.push(`/add-product?barcode=${data}`),
-            },
+              user ? {
+                text: 'Agregar producto',
+                onPress: () => router.push(`/add-product?barcode=${data}`),
+              } : {
+                text: 'Iniciar sesión',
+                onPress: () => router.push('/(auth)/login'),
+              },
             {
               text: 'Escanear otro',
               onPress: () => {
@@ -79,10 +82,49 @@ export default function ScannerScreen() {
           ]
         );
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error checking product:', error);
-      Alert.alert('Error', 'No se pudo procesar el código de barras');
-      setScanned(false);
+      
+      // Handle offline error specifically
+      if (error?.code === 'unavailable' || error?.message?.includes('offline')) {
+        Alert.alert(
+          'Sin conexión',
+          'No hay conexión a internet. Por favor verifica tu conexión e intenta nuevamente.',
+          [
+            {
+              text: 'Reintentar',
+              onPress: () => {
+                setScanned(false);
+                setCameraActive(true);
+              },
+            },
+            {
+              text: 'Cancelar',
+              onPress: () => setScanned(false),
+              style: 'cancel',
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          'No se pudo procesar el código de barras. Intenta nuevamente.',
+          [
+            {
+              text: 'Reintentar',
+              onPress: () => {
+                setScanned(false);
+                setCameraActive(true);
+              },
+            },
+            {
+              text: 'Cancelar',
+              onPress: () => setScanned(false),
+              style: 'cancel',
+            },
+          ]
+        );
+      }
     }
   };
 
