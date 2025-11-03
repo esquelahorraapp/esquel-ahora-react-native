@@ -3,6 +3,9 @@
     "name": "Esquel Ahorra",
     "slug": "esquel-ahorra",
     "version": "1.0.0",
+    "android": {
+      "package": "com.esquelahorra.app"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
