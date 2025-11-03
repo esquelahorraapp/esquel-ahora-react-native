@@ -10,9 +10,11 @@ import {
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { Camera, X } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { Product } from '@/types/database';
 
 export default function ScannerScreen() {
   const { user } = useAuth();
@@ -26,15 +28,17 @@ export default function ScannerScreen() {
 
     try {
       // Check if product exists
-      const { data: existingProduct, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('codigo_barras', data)
-        .single();
-
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
+      const productQuery = query(
+        collection(db, 'products'),
+        where('codigo_barras', '==', data)
+      );
+      
+      const productSnapshot = await getDocs(productQuery);
+      const existingProduct = productSnapshot.empty ? null : {
+        id: productSnapshot.docs[0].id,
+        ...productSnapshot.docs[0].data(),
+        fecha_creacion: productSnapshot.docs[0].data().fecha_creacion?.toDate() || new Date(),
+      } as Product;
 
       if (existingProduct) {
         // Product exists, navigate to product detail

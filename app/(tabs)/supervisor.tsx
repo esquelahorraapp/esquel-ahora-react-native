@@ -10,20 +10,21 @@ import {
 } from 'react-native';
 import { Check, X, Clock, Eye } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/firebase';
+import { 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  getDocs, 
+  doc, 
+  updateDoc, 
+  addDoc, 
+  increment,
+  serverTimestamp 
+} from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
-import { Database } from '@/types/database';
-
-type Price = Database['public']['Tables']['prices']['Row'];
-type Product = Database['public']['Tables']['products']['Row'];
-type Store = Database['public']['Tables']['stores']['Row'];
-type User = Database['public']['Tables']['users']['Row'];
-
-interface PendingPrice extends Price {
-  products?: Product;
-  stores?: Store;
-  users?: User;
-}
+import { PendingPrice, Price, Product, Store, UserProfile } from '@/types/database';
 
 export default function SupervisorScreen() {
   const { profile } = useAuth();
@@ -38,19 +39,89 @@ export default function SupervisorScreen() {
 
   const fetchPendingPrices = async () => {
     try {
-      const { data, error } = await supabase
-        .from('prices')
-        .select(`
-          *,
-          products(nombre, marca, categoria),
-          stores(nombre, direccion),
-          users(nombre, email)
-        `)
-        .eq('estado', 'pendiente')
-        .order('fecha_registro', { ascending: false });
+      const pricesQuery = query(
+        collection(db, 'prices'),
+        where('estado', '==', 'pendiente'),
+        orderBy('fecha_registro', 'desc')
+      );
+      
+      const pricesSnapshot = await getDocs(pricesQuery);
+      const prices = pricesSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        fecha_registro: doc.data().fecha_registro?.toDate() || new Date(),
+      })) as Price[];
 
-      if (error) throw error;
-      setPendingPrices(data || []);
+      // Fetch related data for each price
+      const pendingPricesWithData: PendingPrice[] = [];
+      
+      for (const price of prices) {
+        const pendingPrice: PendingPrice = { ...price };
+        
+        // Fetch product data
+        if (price.producto_id) {
+          try {
+            const productQuery = query(
+              collection(db, 'products'),
+              where('__name__', '==', price.producto_id)
+            );
+            const productSnapshot = await getDocs(productQuery);
+            if (!productSnapshot.empty) {
+              pendingPrice.product = {
+                id: productSnapshot.docs[0].id,
+                ...productSnapshot.docs[0].data(),
+                fecha_creacion: productSnapshot.docs[0].data().fecha_creacion?.toDate() || new Date(),
+              } as Product;
+            }
+          } catch (error) {
+            console.error('Error fetching product:', error);
+          }
+        }
+        
+        // Fetch store data
+        if (price.comercio_id) {
+          try {
+            const storeQuery = query(
+              collection(db, 'stores'),
+              where('__name__', '==', price.comercio_id)
+            );
+            const storeSnapshot = await getDocs(storeQuery);
+            if (!storeSnapshot.empty) {
+              pendingPrice.store = {
+                id: storeSnapshot.docs[0].id,
+                ...storeSnapshot.docs[0].data(),
+                fecha_registro: storeSnapshot.docs[0].data().fecha_registro?.toDate() || new Date(),
+              } as Store;
+            }
+          } catch (error) {
+            console.error('Error fetching store:', error);
+          }
+        }
+        
+        // Fetch user data
+        if (price.usuario_id) {
+          try {
+            const userQuery = query(
+              collection(db, 'users'),
+              where('__name__', '==', price.usuario_id)
+            );
+            const userSnapshot = await getDocs(userQuery);
+            if (!userSnapshot.empty) {
+              pendingPrice.user = {
+                id: userSnapshot.docs[0].id,
+                ...userSnapshot.docs[0].data(),
+                fecha_registro: userSnapshot.docs[0].data().fecha_registro?.toDate() || new Date(),
+              } as UserProfile;
+            }
+          } catch (error) {
+            console.error('Error fetching user:', error);
+          }
+        }
+        
+        pendingPricesWithData.push(pendingPrice);
+      }
+      
+      setPendingPrices(pendingPricesWithData);
     } catch (error) {
       console.error('Error fetching pending prices:', error);
       Alert.alert('Error', 'No se pudieron cargar los precios pendientes');
@@ -64,36 +135,27 @@ export default function SupervisorScreen() {
       const newStatus = action === 'approve' ? 'verificado' : 'rechazado';
       
       // Update price status
-      const { error: priceError } = await supabase
-        .from('prices')
-        .update({
-          estado: newStatus,
-          verificado: action === 'approve',
-          supervisor_id: profile?.id,
-        })
-        .eq('id', priceId);
-
-      if (priceError) throw priceError;
+      await updateDoc(doc(db, 'prices', priceId), {
+        estado: newStatus,
+        verificado: action === 'approve',
+        supervisor_id: profile?.id,
+      });
 
       // Create validation record
-      const { error: validationError } = await supabase
-        .from('validations')
-        .insert({
-          precio_id: priceId,
-          supervisor_id: profile?.id,
-          estado: action === 'approve' ? 'aprobado' : 'rechazado',
-        });
-
-      if (validationError) throw validationError;
+      await addDoc(collection(db, 'validations'), {
+        precio_id: priceId,
+        supervisor_id: profile?.id,
+        estado: action === 'approve' ? 'aprobado' : 'rechazado',
+        fecha_validacion: serverTimestamp(),
+      });
 
       // Award points to user if approved
       if (action === 'approve') {
         const price = pendingPrices.find(p => p.id === priceId);
         if (price?.usuario_id) {
-          await supabase
-            .from('users')
-            .update({ puntos: supabase.sql`puntos + 10` })
-            .eq('id', price.usuario_id);
+          await updateDoc(doc(db, 'users', price.usuario_id), {
+            puntos: increment(10)
+          });
         }
       }
 
@@ -159,10 +221,10 @@ export default function SupervisorScreen() {
               <View style={styles.priceHeader}>
                 <View style={styles.productInfo}>
                   <Text style={styles.productName}>
-                    {price.products?.nombre || 'Producto desconocido'}
+                    {price.product?.nombre || 'Producto desconocido'}
                   </Text>
                   <Text style={styles.productBrand}>
-                    {price.products?.marca} • {price.products?.categoria}
+                    {price.product?.marca} • {price.product?.categoria}
                   </Text>
                 </View>
                 <Text style={styles.price}>${price.precio}</Text>
@@ -170,10 +232,10 @@ export default function SupervisorScreen() {
 
               <View style={styles.priceDetails}>
                 <Text style={styles.detailText}>
-                  📍 {price.stores?.nombre || 'Comercio desconocido'}
+                  📍 {price.store?.nombre || 'Comercio desconocido'}
                 </Text>
                 <Text style={styles.detailText}>
-                  👤 {price.users?.nombre || 'Usuario desconocido'}
+                  👤 {price.user?.nombre || 'Usuario desconocido'}
                 </Text>
                 <Text style={styles.detailText}>
                   📅 {formatDate(price.fecha_registro)}

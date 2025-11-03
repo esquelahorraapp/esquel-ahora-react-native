@@ -12,7 +12,8 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Package, Tag, Camera } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, query, where, getDocs, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function AddProductScreen() {
@@ -48,23 +49,27 @@ export default function AddProductScreen() {
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from('products')
-        .insert({
+      // Check if product already exists
+      const existingProductQuery = query(
+        collection(db, 'products'),
+        where('codigo_barras', '==', barcode as string)
+      );
+      
+      const existingProductSnapshot = await getDocs(existingProductQuery);
+      
+      if (!existingProductSnapshot.empty) {
+        Alert.alert('Error', 'Este código de barras ya existe en nuestra base de datos');
+      } else {
+        // Add new product
+        await addDoc(collection(db, 'products'), {
           codigo_barras: barcode as string,
           nombre,
           marca,
           categoria,
-          usuario_creador_id: user?.id,
+          usuario_creador_id: user?.uid,
+          fecha_creacion: serverTimestamp(),
         });
 
-      if (error) {
-        if (error.code === '23505') {
-          Alert.alert('Error', 'Este código de barras ya existe en nuestra base de datos');
-        } else {
-          throw error;
-        }
-      } else {
         Alert.alert(
           'Producto agregado',
           '¡Gracias por contribuir! Has ganado 20 puntos.',
@@ -77,10 +82,11 @@ export default function AddProductScreen() {
         );
 
         // Award points to user
-        await supabase
-          .from('users')
-          .update({ puntos: supabase.sql`puntos + 20` })
-          .eq('id', user?.id);
+        if (user?.uid) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            puntos: increment(20)
+          });
+        }
       }
     } catch (error) {
       console.error('Error adding product:', error);

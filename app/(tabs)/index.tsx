@@ -9,21 +9,20 @@ import {
   SafeAreaView,
   Alert,
 } from 'react-native';
-import { Search, MapPin, TrendingDown } from 'lucide-react-native';
+import { Search, TrendingDown } from 'lucide-react-native';
+import { 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  limit, 
+  getDocs,
+  or
+} from 'firebase/firestore';
 import { Colors } from '@/constants/Colors';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
-import { Database } from '@/types/database';
-
-type Product = Database['public']['Tables']['products']['Row'];
-type Price = Database['public']['Tables']['prices']['Row'];
-type Store = Database['public']['Tables']['stores']['Row'];
-
-interface ProductWithPrice extends Product {
-  lowest_price?: number;
-  store_name?: string;
-  distance?: string;
-}
+import { ProductWithPrice, Product, Price, Store } from '@/types/database';
 
 export default function HomeScreen() {
   const { profile } = useAuth();
@@ -38,34 +37,82 @@ export default function HomeScreen() {
 
   const fetchFeaturedProducts = async () => {
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select(`
-          *,
-          prices!inner(
-            precio,
-            stores(nombre)
-          )
-        `)
-        .eq('prices.verificado', true)
-        .limit(5);
+      // Get verified prices
+      const pricesQuery = query(
+        collection(db, 'prices'),
+        where('verificado', '==', true),
+        orderBy('fecha_registro', 'desc'),
+        limit(10)
+      );
+      
+      const pricesSnapshot = await getDocs(pricesQuery);
+      const prices = pricesSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        fecha_registro: doc.data().fecha_registro?.toDate() || new Date(),
+      })) as Price[];
 
-      if (error) throw error;
+      // Get unique product IDs
+      const productIds = [...new Set(prices.map(p => p.producto_id).filter(Boolean))];
+      
+      if (productIds.length === 0) {
+        setFeaturedProducts([]);
+        return;
+      }
 
-      const productsWithPrices = data?.map((product: any) => {
-        const prices = product.prices || [];
-        const lowestPrice = Math.min(...prices.map((p: any) => p.precio));
-        const lowestPriceStore = prices.find((p: any) => p.precio === lowestPrice);
+      // Get products
+      const productsData: ProductWithPrice[] = [];
+      
+      for (const productId of productIds.slice(0, 5)) {
+        try {
+          const productQuery = query(
+            collection(db, 'products'),
+            where('__name__', '==', productId)
+          );
+          const productSnapshot = await getDocs(productQuery);
+          
+          if (!productSnapshot.empty) {
+            const productDoc = productSnapshot.docs[0];
+            const product = {
+              id: productDoc.id,
+              ...productDoc.data(),
+              fecha_creacion: productDoc.data().fecha_creacion?.toDate() || new Date(),
+            } as Product;
 
-        return {
-          ...product,
-          lowest_price: lowestPrice,
-          store_name: lowestPriceStore?.stores?.nombre,
-          prices: undefined,
-        };
-      }) || [];
+            // Find lowest price for this product
+            const productPrices = prices.filter(p => p.producto_id === productId);
+            const lowestPrice = Math.min(...productPrices.map(p => p.precio));
+            const lowestPriceData = productPrices.find(p => p.precio === lowestPrice);
 
-      setFeaturedProducts(productsWithPrices);
+            // Get store name
+            let storeName = 'Comercio desconocido';
+            if (lowestPriceData?.comercio_id) {
+              try {
+                const storeQuery = query(
+                  collection(db, 'stores'),
+                  where('__name__', '==', lowestPriceData.comercio_id)
+                );
+                const storeSnapshot = await getDocs(storeQuery);
+                if (!storeSnapshot.empty) {
+                  storeName = storeSnapshot.docs[0].data().nombre;
+                }
+              } catch (error) {
+                console.error('Error fetching store:', error);
+              }
+            }
+
+            productsData.push({
+              ...product,
+              lowest_price: lowestPrice,
+              store_name: storeName,
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching product:', error);
+        }
+      }
+
+      setFeaturedProducts(productsData);
     } catch (error) {
       console.error('Error fetching featured products:', error);
     }
@@ -79,32 +126,75 @@ export default function HomeScreen() {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select(`
-          *,
-          prices!inner(
-            precio,
-            stores(nombre)
-          )
-        `)
-        .or(`nombre.ilike.%${searchQuery}%,marca.ilike.%${searchQuery}%,codigo_barras.eq.${searchQuery}`)
-        .eq('prices.verificado', true);
+      // Search products by name, brand, or barcode
+      const productsQuery = query(
+        collection(db, 'products'),
+        limit(20)
+      );
+      
+      const productsSnapshot = await getDocs(productsQuery);
+      const allProducts = productsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        fecha_creacion: doc.data().fecha_creacion?.toDate() || new Date(),
+      })) as Product[];
 
-      if (error) throw error;
+      // Filter products locally (Firebase doesn't support complex text search)
+      const filteredProducts = allProducts.filter(product => 
+        product.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.marca.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.codigo_barras === searchQuery
+      );
 
-      const productsWithPrices = data?.map((product: any) => {
-        const prices = product.prices || [];
-        const lowestPrice = Math.min(...prices.map((p: any) => p.precio));
-        const lowestPriceStore = prices.find((p: any) => p.precio === lowestPrice);
+      // Get prices for filtered products
+      const productsWithPrices: ProductWithPrice[] = [];
+      
+      for (const product of filteredProducts) {
+        try {
+          const pricesQuery = query(
+            collection(db, 'prices'),
+            where('producto_id', '==', product.id),
+            where('verificado', '==', true)
+          );
+          
+          const pricesSnapshot = await getDocs(pricesQuery);
+          const prices = pricesSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            fecha_registro: doc.data().fecha_registro?.toDate() || new Date(),
+          })) as Price[];
 
-        return {
-          ...product,
-          lowest_price: lowestPrice,
-          store_name: lowestPriceStore?.stores?.nombre,
-          prices: undefined,
-        };
-      }) || [];
+          if (prices.length > 0) {
+            const lowestPrice = Math.min(...prices.map(p => p.precio));
+            const lowestPriceData = prices.find(p => p.precio === lowestPrice);
+
+            // Get store name
+            let storeName = 'Comercio desconocido';
+            if (lowestPriceData?.comercio_id) {
+              try {
+                const storeQuery = query(
+                  collection(db, 'stores'),
+                  where('__name__', '==', lowestPriceData.comercio_id)
+                );
+                const storeSnapshot = await getDocs(storeQuery);
+                if (!storeSnapshot.empty) {
+                  storeName = storeSnapshot.docs[0].data().nombre;
+                }
+              } catch (error) {
+                console.error('Error fetching store:', error);
+              }
+            }
+
+            productsWithPrices.push({
+              ...product,
+              lowest_price: lowestPrice,
+              store_name: storeName,
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching prices for product:', error);
+        }
+      }
 
       setProducts(productsWithPrices);
     } catch (error) {
