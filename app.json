@@ -4,7 +4,10 @@
     "slug": "esquel-ahorra",
     "version": "1.0.0",
     "android": {
-      "package": "com.esquelahorra.app"
+      "package": "com.esquelahorra.app",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -12,7 +15,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.esquelahorra.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "web": {
       "bundler": "metro",
